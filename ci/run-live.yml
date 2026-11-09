@@ -1,0 +1,35 @@
+name: run-against-tiger-cloud
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r requirements.txt
+      - run: pip install playwright && python -m playwright install --with-deps chromium
+      - name: Stream live events + dashboard screenshot
+        run: |
+          python ingest.py --seconds 330 > results/ingest.log 2>&1 &
+          IPID=$!
+          sleep 20
+          streamlit run app.py --server.headless true --server.port 8501 --browser.gatherUsageStats false > /tmp/streamlit.log 2>&1 &
+          sleep 280
+          python scripts/screenshot.py http://localhost:8501 results/dashboard.png
+          wait $IPID
+          tail -n 5 results/ingest.log
+          python report.py
+      - name: Commit live results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add results
+          git commit -m "Live run results from Tiger Cloud ($(date -u +%FT%TZ))" || echo "no changes"
+          git push
